@@ -82,6 +82,12 @@ io.on('connection', (socket) => {
       // Optional: delete room if empty
       if (rooms[roomId].users.length === 0) delete rooms[roomId];
     });
+
+    // Respond to get-users request with current user list
+    socket.on('get-users', ({ roomId: rid }) => {
+      if (!rooms[rid]) return;
+      io.to(rid).emit('room-users', rooms[rid].users);
+    });
   });
 });
 
