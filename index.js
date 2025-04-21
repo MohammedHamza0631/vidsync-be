@@ -22,6 +22,10 @@ const rooms = {};
 function generateRoomId() {
   return Math.random().toString(36).substr(2, 6);
 }
+// A helper health check endpoint
+app.get('/api/healthz', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
 // Create Room endpoint
 app.post('/api/create-room', (req, res) => {
