@@ -16,8 +16,8 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
-// In-memory room storage
-const rooms = {};
+const rooms = {};       // In‐memory rooms
+const userNames = {};   // NEW: socket.id ➔ user’s name
 
 // Helper to generate unique room IDs
 function generateRoomId() {
@@ -35,7 +35,7 @@ app.post('/api/create-room', (req, res) => {
     return res.status(400).json({ error: 'Invalid YouTube video ID.' });
   }
   const roomId = generateRoomId();
-  
+
   // Create room immediately to ensure it's available for future requests
   rooms[roomId] = {
     videoId,
@@ -46,7 +46,7 @@ app.post('/api/create-room', (req, res) => {
     users: [],
     createdAt: Date.now()
   };
-  
+
   // Respond after ensuring the room is stored in memory
   res.json({ roomId });
 });
@@ -62,17 +62,27 @@ app.get('/api/room/:roomId', (req, res) => {
 
 // Socket.io events
 io.on('connection', (socket) => {
-  socket.on('join-room', ({ roomId }) => {
+  socket.on('join-room', ({ roomId, name }) => {
     if (!rooms[roomId]) {
       socket.emit('error', 'Room does not exist.');
       return;
     }
+    // Store the user’s chosen name
+    userNames[socket.id] = name || 'Anonymous';
+
     socket.join(roomId);
     rooms[roomId].users.push(socket.id);
     // Send current state to new user
     socket.emit('video-state', rooms[roomId].state);
     // Notify others
     socket.to(roomId).emit('user-joined', { userId: socket.id });
+
+    // Broadcast updated user list with names
+    const usersInRoom = rooms[roomId].users.map(id => ({
+      id,
+      name: userNames[id] || 'Anonymous'
+    }));
+    io.to(roomId).emit('room-users', usersInRoom);
 
     // Video state changes
     socket.on('video-state-change', (data) => {
@@ -82,16 +92,32 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
-      rooms[roomId].users = rooms[roomId].users.filter((id) => id !== socket.id);
-      socket.to(roomId).emit('user-left', { userId: socket.id });
-      // Optional: delete room if empty
-      if (rooms[roomId].users.length === 0) delete rooms[roomId];
+      // Remove user from room
+      rooms[roomId].users = rooms[roomId].users.filter(id => id !== socket.id);
+      // Remove their name
+      delete userNames[socket.id];
+
+      if (rooms[roomId].users.length > 0) {
+        // Broadcast updated list
+        const updated = rooms[roomId].users.map(id => ({
+          id,
+          name: userNames[id] || 'Anonymous'
+        }));
+        io.to(roomId).emit('room-users', updated);
+      } else {
+        // Delete room if empty
+        delete rooms[roomId];
+      }
     });
 
     // Respond to get-users request with current user list
     socket.on('get-users', ({ roomId: rid }) => {
       if (!rooms[rid]) return;
-      io.to(rid).emit('room-users', rooms[rid].users);
+      const usersInRoom = rooms[rid].users.map(id => ({
+        id,
+        name: userNames[id] || 'Anonymous'
+      }));
+      io.to(rid).emit('room-users', usersInRoom);
     });
   });
 });
